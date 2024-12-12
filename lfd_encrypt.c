@@ -133,15 +133,64 @@ struct lfd_mod lfd_encrypt = {
 
 #else  /* HAVE_SSL */
 
-int no_encrypt(struct vtun_host *host)
+#define ENC_BUF_SIZE (VTUN_FRAME_SIZE + 16)
+
+static char *enc_buf = NULL;
+static unsigned char xor_key = 0xAA;
+
+int alloc_encrypt(struct vtun_host *host)
 {
-     syslog(LOG_INFO, "Encryption is not supported");
-     return -1;
+    // Выделяем буфер, как в оригинале
+    if(!(enc_buf = lfd_alloc(ENC_BUF_SIZE))){
+        syslog(LOG_ERR,"Can't allocate buffer for encryptor");
+        return -1;
+    }
+
+    syslog(LOG_INFO, "Simple XOR encryption initialized");
+    return 0;
 }
 
+int free_encrypt()
+{
+   lfd_free(enc_buf); 
+   enc_buf = NULL;
+   return 0;
+}
+
+int encrypt_buf(int len, char *in, char **out)
+{ 
+   int i;
+   for(i=0; i<len; i++){
+       enc_buf[i] = in[i] ^ xor_key;
+   }
+   *out = enc_buf;
+   return len;
+}
+
+int decrypt_buf(int len, char *in, char **out)
+{
+   int i;
+   // Дешифруем на месте
+   for(i=0; i<len; i++){
+       in[i] = in[i] ^ xor_key;
+   }
+   *out = in;
+   return len;
+}
+
+/* 
+ * Структура модуля.
+ */
 struct lfd_mod lfd_encrypt = {
      "Encryptor",
-     no_encrypt, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+     alloc_encrypt,
+     encrypt_buf,
+     NULL,
+     decrypt_buf,
+     NULL,
+     free_encrypt,
+     NULL,
+     NULL
 };
 
 #endif /* HAVE_SSL */

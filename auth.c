@@ -94,30 +94,30 @@ void decrypt_chal(char *chal, char *pwd)
 
 #else /* HAVE_SSL */
 
+
 void encrypt_chal(char *chal, char *pwd)
-{ 
-   char * xor_msk = pwd;
-   register int i, xor_len = strlen(xor_msk);
-
-   for(i=0; i < VTUN_CHAL_SIZE; i++)
-      chal[i] ^= xor_msk[i%xor_len];
+{
+   char *xor_msk = pwd;
+   int xor_len = strlen(xor_msk);
+   for (int i=0; i < VTUN_CHAL_SIZE; i++)
+      chal[i] ^= xor_msk[i % xor_len];
 }
 
-void inline decrypt_chal(char *chal, char *pwd)
-{ 
-   encrypt_chal(chal, pwd);
+void decrypt_chal(char *chal, char *pwd)
+{
+   encrypt_chal(chal, pwd); // XOR обратима тем же ключом
 }
 
-/* Generate PSEUDO random challenge key. */
+/* Генерируем псевдослучайный challenge ключ */
 void gen_chal(char *buf)
 {
-   register int i;
- 
    srand(time(NULL));
-
-   for(i=0; i < VTUN_CHAL_SIZE; i++)
+   for (int i=0; i < VTUN_CHAL_SIZE; i++)
       buf[i] = (unsigned int)(255.0 * rand()/RAND_MAX);
 }
+
+
+
 #endif /* HAVE_SSL */
 
 /* 
