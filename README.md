@@ -17,11 +17,11 @@ apt install gcc flex yacc libssl-dev make -y
 ./configure --disable-ssl  --disable-lzo --disable-zlib --disable-shaper
 make install
 ```
-
-# client.conf
-
-```
- cat << EOF > /home/client.conf
+<details>
+  <summary>Client.conf</summary>
+  
+  ```sh
+cat << EOF > /home/client.conf
 options {
   port 5344;            # Connect to this port.
   timeout 60;           # General timeout
@@ -48,10 +48,13 @@ cobra {
   };
 }
 EOF
-```
+  ```
+</details>
 
-# server.conf
-```
+<details>
+  <summary>Server.conf</summary>
+  
+  ```sh
 cat << EOF > /home/server.conf
 options {
   port 5344;            # Listen on this port.
@@ -89,8 +92,9 @@ cobra {
         ifconfig "%% 10.3.0.1 pointopoint 10.3.0.2 mtu 1450";
   };
 }
-EOf
-```
+EOF
+  ```
+</details>
 
 # 2 Start/Stop
 
@@ -122,7 +126,7 @@ cat filename.in | nc -q 1 10.3.0.1 5344
 sudo tcpdump -i enp0s3 -nn -lex port 5344 -w dump
 
 
-open dump in wireshark
+open dump in wireshark and search for plain text
 ```
 
 
