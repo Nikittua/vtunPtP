@@ -133,64 +133,97 @@ struct lfd_mod lfd_encrypt = {
 
 #else  /* HAVE_SSL */
 
-#define ENC_BUF_SIZE (VTUN_FRAME_SIZE + 16)
+#include <libakrypt.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <stdint.h>
+
+
+#define ENC_BUF_SIZE (VTUN_FRAME_SIZE + 128)
+#define KUZNECHIK_BLOCK_SIZE 128
 
 static char *enc_buf = NULL;
-static unsigned char xor_key = 0xAA;
+static struct bckey kuznechik_key;
+static uint8_t iv[KUZNECHIK_BLOCK_SIZE] = {0};
 
 int alloc_encrypt(struct vtun_host *host)
 {
-    // Выделяем буфер, как в оригинале
-    if(!(enc_buf = lfd_alloc(ENC_BUF_SIZE))){
-        syslog(LOG_ERR,"Can't allocate buffer for encryptor");
+    // Выделяем буфер для шифрования
+    if (!(enc_buf = lfd_alloc(ENC_BUF_SIZE))) {
+        syslog(LOG_ERR, "Can't allocate buffer for encryptor");
         return -1;
     }
 
-    syslog(LOG_INFO, "Simple XOR encryption initialized");
+    // Инициализация ключа "Кузнечик"
+    if (ak_bckey_create_kuznechik(&kuznechik_key) != ak_error_ok) {
+        syslog(LOG_ERR, "Failed to create Kuznechik key");
+        lfd_free(enc_buf);
+        return -1;
+    }
+
+    // Устанавливаем ключ (например, все байты равны 0x01 для теста)
+    uint8_t key[32];
+    memset(key, 0x01, sizeof(key));
+
+    if (ak_bckey_set_key(&kuznechik_key, key, sizeof(key)) != ak_error_ok) {
+        syslog(LOG_ERR, "Failed to set Kuznechik key");
+        ak_bckey_destroy(&kuznechik_key);
+        lfd_free(enc_buf);
+        return -1;
+    }
+
+    syslog(LOG_INFO, "Kuznechik encryption initialized");
     return 0;
 }
 
 int free_encrypt()
 {
-   lfd_free(enc_buf); 
-   enc_buf = NULL;
-   return 0;
+    ak_bckey_destroy(&kuznechik_key);
+    lfd_free(enc_buf);
+    enc_buf = NULL;
+    return 0;
 }
 
 int encrypt_buf(int len, char *in, char **out)
-{ 
-   int i;
-   for(i=0; i<len; i++){
-       enc_buf[i] = in[i] ^ xor_key;
-   }
-   *out = enc_buf;
-   return len;
+{
+    // Шифрование с использованием режима CBC
+    if (ak_bckey_encrypt_cbc(&kuznechik_key, in, enc_buf, len, iv, KUZNECHIK_BLOCK_SIZE) != ak_error_ok) {
+        syslog(LOG_ERR, "Encryption failed");
+        return -1;
+    }
+
+    *out = enc_buf;
+    return len;
 }
 
 int decrypt_buf(int len, char *in, char **out)
 {
-   int i;
-   // Дешифруем на месте
-   for(i=0; i<len; i++){
-       in[i] = in[i] ^ xor_key;
-   }
-   *out = in;
-   return len;
+    // Расшифровка с использованием режима CBC
+    if (ak_bckey_decrypt_cbc(&kuznechik_key, in, enc_buf, len, iv, KUZNECHIK_BLOCK_SIZE) != ak_error_ok) {
+        syslog(LOG_ERR, "Decryption failed");
+        return -1;
+    }
+
+    *out = enc_buf;
+    return len;
 }
 
 /* 
  * Структура модуля.
  */
 struct lfd_mod lfd_encrypt = {
-     "Encryptor",
-     alloc_encrypt,
-     encrypt_buf,
-     NULL,
-     decrypt_buf,
-     NULL,
-     free_encrypt,
-     NULL,
-     NULL
+    "Encryptor",
+    alloc_encrypt,
+    encrypt_buf,
+    NULL,
+    decrypt_buf,
+    NULL,
+    free_encrypt,
+    NULL,
+    NULL
 };
 
 #endif /* HAVE_SSL */
+
+
