@@ -28,6 +28,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <syslog.h>
+#include <libakrypt.h>
 
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
@@ -68,6 +69,13 @@ int main(int argc, char *argv[], char *env[])
      vtun.route = strdup("/sbin/route");
      vtun.fwall = strdup("/sbin/ipchains");	
      vtun.iproute = strdup("/sbin/ip");	
+
+
+     /*libakrypt init*/
+     if (alloc_encrypt(host) < 0) {
+          fprintf(stderr, "Failed to initialize Kuznechik encryption.\n");
+          exit(1);
+     }
 
      vtun.svr_name = NULL;
      vtun.svr_port = -1;
@@ -192,6 +200,7 @@ int main(int argc, char *argv[], char *env[])
      closelog();
 	
      return 0;
+     free_encrypt();
 }
 
 /* 
@@ -229,3 +238,4 @@ void usage(void)
      printf("\tvtund [-f file] [-P port] [-L local address] "
 	    "[-p] [-t timeout] <host> <server adress>\n");
 }
+
