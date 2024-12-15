@@ -45,6 +45,8 @@
 #include "vtun.h"
 #include "linkfd.h"
 #include "lib.h"
+#include <libakrypt.h>
+
 
 #ifdef HAVE_SSL
 
@@ -133,95 +135,153 @@ struct lfd_mod lfd_encrypt = {
 
 #else  /* HAVE_SSL */
 
-#include <libakrypt.h>
-#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include "config.h"
+
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <syslog.h>
-#include <stdint.h>
+#include <strings.h>
+#include <string.h>
 
+#include "vtun.h"
+#include "linkfd.h"
+#include "lib.h"
+#include <syslog.h>
+#include <libakrypt.h>
 
-#define ENC_BUF_SIZE (VTUN_FRAME_SIZE + 128)
-#define KUZNECHIK_BLOCK_SIZE 128
+#define ENC_BUF_SIZE (VTUN_FRAME_SIZE + 16)
+#define SALT_SIZE 4  // "rand", 4 bytes
 
-static char *enc_buf = NULL;
-static struct bckey kuznechik_key;
-static uint8_t iv[KUZNECHIK_BLOCK_SIZE] = {0};
+typedef struct {
+    struct bckey bkey;  // bckey structure, not a pointer
+    char *enc_buf;      // Encryption buffer
+} encrypt_context;
+
+static encrypt_context ctx = {0};
 
 int alloc_encrypt(struct vtun_host *host)
 {
-    // Выделяем буфер для шифрования
-    if (!(enc_buf = lfd_alloc(ENC_BUF_SIZE))) {
+    int error = ak_error_ok;
+    const char salt[SALT_SIZE] = "rand";  // fixed salt
+     
+    ctx.enc_buf = lfd_alloc(ENC_BUF_SIZE);
+    if (ctx.enc_buf == NULL) {
         syslog(LOG_ERR, "Can't allocate buffer for encryptor");
         return -1;
     }
 
-    // Инициализация ключа "Кузнечик"
-    if (ak_bckey_create_kuznechik(&kuznechik_key) != ak_error_ok) {
-        syslog(LOG_ERR, "Failed to create Kuznechik key");
-        lfd_free(enc_buf);
+    if (ak_libakrypt_create(NULL) != ak_true) {
+        syslog(LOG_ERR, "Failed to initialize libakrypt");
+        lfd_free(ctx.enc_buf);
+        ctx.enc_buf = NULL;
         return -1;
     }
 
-    // Устанавливаем ключ (например, все байты равны 0x01 для теста)
-    uint8_t key[32];
-    memset(key, 0x01, sizeof(key));
-
-    if (ak_bckey_set_key(&kuznechik_key, key, sizeof(key)) != ak_error_ok) {
-        syslog(LOG_ERR, "Failed to set Kuznechik key");
-        ak_bckey_destroy(&kuznechik_key);
-        lfd_free(enc_buf);
+    error = ak_bckey_create_oid(&ctx.bkey, ak_oid_find_by_name("kuznechik"));
+    if (error != ak_error_ok) {
+        ak_error_message(error, __func__, "Failed to create block cipher key context");
+        ak_libakrypt_destroy();
+        lfd_free(ctx.enc_buf);
+        ctx.enc_buf = NULL;
         return -1;
     }
 
-    syslog(LOG_INFO, "Kuznechik encryption initialized");
+    error = ak_bckey_set_key_from_password(&ctx.bkey,
+                                           host->passwd, strlen(host->passwd),
+                                           salt, SALT_SIZE);
+    if (error != ak_error_ok) {
+        ak_error_message(error, __func__, "Failed to set key from password");
+        ak_bckey_destroy(&ctx.bkey);
+        ak_libakrypt_destroy();
+        lfd_free(ctx.enc_buf);
+        ctx.enc_buf = NULL;
+        return -1;
+    }
+
+    syslog(LOG_INFO, "libakrypt encryption initialized with Kuznechik cipher");
     return 0;
 }
 
 int free_encrypt()
 {
-    ak_bckey_destroy(&kuznechik_key);
-    lfd_free(enc_buf);
-    enc_buf = NULL;
+    if (ctx.enc_buf) {
+        lfd_free(ctx.enc_buf);
+        ctx.enc_buf = NULL;
+    }
+    ak_bckey_destroy(&ctx.bkey);
+    ak_libakrypt_destroy();
     return 0;
 }
 
 int encrypt_buf(int len, char *in, char **out)
 {
-    // Шифрование с использованием режима CBC
-    if (ak_bckey_encrypt_cbc(&kuznechik_key, in, enc_buf, len, iv, KUZNECHIK_BLOCK_SIZE) != ak_error_ok) {
-        syslog(LOG_ERR, "Encryption failed");
+    int pad;
+    size_t total_len;
+    char *out_ptr = ctx.enc_buf;
+    int error;
+
+    pad = ctx.bkey.bsize - (len % ctx.bkey.bsize);
+    if (pad == 0) pad = ctx.bkey.bsize;
+
+    total_len = len + pad;
+    if (total_len > ENC_BUF_SIZE) {
+        syslog(LOG_ERR, "Encrypted buffer size is insufficient");
         return -1;
     }
 
-    *out = enc_buf;
-    return len;
+    memset(out_ptr, pad, pad);
+    memcpy(out_ptr + pad, in, len);
+
+    error = ak_bckey_encrypt_ecb(&ctx.bkey,
+                                 (const ak_pointer)out_ptr,
+                                 (ak_pointer)out_ptr,
+                                 total_len);
+    if (error != ak_error_ok) {
+        ak_error_message(error, __func__, "Encryption failed");
+        return -1;
+    }
+
+    *out = ctx.enc_buf;
+    return total_len;
 }
 
 int decrypt_buf(int len, char *in, char **out)
 {
-    // Расшифровка с использованием режима CBC
-    if (ak_bckey_decrypt_cbc(&kuznechik_key, in, enc_buf, len, iv, KUZNECHIK_BLOCK_SIZE) != ak_error_ok) {
-        syslog(LOG_ERR, "Decryption failed");
+    int pad;
+    int error;
+
+    error = ak_bckey_decrypt_ecb(&ctx.bkey,
+                                 (const ak_pointer)in,
+                                 (ak_pointer)in,
+                                 len);
+    if (error != ak_error_ok) {
+        ak_error_message(error, __func__, "Decryption failed");
         return -1;
     }
 
-    *out = enc_buf;
-    return len;
+    pad = (unsigned char)*in;
+    if (pad < 1 || pad > ctx.bkey.bsize) {
+        syslog(LOG_INFO, "decrypt_buf: bad pad length");
+        return 0;
+    }
+
+    *out = in + pad;
+    return len - pad;
 }
 
-/* 
- * Структура модуля.
- */
 struct lfd_mod lfd_encrypt = {
-    "Encryptor",
-    alloc_encrypt,
-    encrypt_buf,
-    NULL,
-    decrypt_buf,
-    NULL,
-    free_encrypt,
-    NULL,
-    NULL
+     "libakrypt Encryptor",
+     alloc_encrypt,
+     encrypt_buf,
+     NULL,          // No additional initialization
+     decrypt_buf,
+     NULL,          // No additional processing
+     free_encrypt,
+     NULL,          // No additional cleanup
+     NULL           // No additional functions
 };
 
 #endif /* HAVE_SSL */
