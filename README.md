@@ -1,7 +1,7 @@
 # vtunPtP
 VtunPtP tunnel with ghost cryptography
 
-Отчёт: vtunPtP/ПАЗИ отчет.docx
+Отчёт: [vtunPtP/ПАЗИ отчет.docx](https://github.com/Nikittua/vtunPtP/blob/kuznechik/%D0%9F%D0%90%D0%97%D0%98%20%D0%BE%D1%82%D1%87%D0%B5%D1%82.docx)
 
 
 # 0 Prepare
