@@ -27,8 +27,7 @@ cd vtunPtP
 ```sh
 ./configure --disable-ssl  --disable-lzo --disable-zlib --disable-shaper
 
-./configure --disable-ssl  --disable-lzo --disable-zlib --disable-shaper
-
+# insert into Makefile
 LDFLAGS += -L/usr/local/lib -lakrypt
 CFLAGS += -I/usr/local/include
 LDFLAGS+= -Xlinker -rpath=/usr/local/include/
