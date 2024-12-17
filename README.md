@@ -5,16 +5,34 @@ VtunPtP tunnel with ghost cryptography
 # 0 Prepare
 
 ```sh
-git clone https://github.com/Nikittua/vtunPtP.git
-cd vtunPtP/
-apt install gcc flex yacc libssl-dev make -y
+apt update
+sudo apt-get install zlib1g zlib1g-dev libbz2-dev cmake flex yacc -y
+git clone https://git.miem.hse.ru/axelkenzo/libakrypt-0.x
+mkdir build
+cd build/
+cmake -DCMAKE_C_FLAGS="-march=native" ../libakrypt-0.x
+sudo make
+sudo make install
+sudo ldconfig
+cd
+git clone -b kuznechik https://github.com/Nikittua/vtunPtP.git
+cd vtunPtP
 
 ```
 
-# 1 Configure
+# 1 Configure and edit Makefile
 
 ```sh
 ./configure --disable-ssl  --disable-lzo --disable-zlib --disable-shaper
+
+./configure --disable-ssl  --disable-lzo --disable-zlib --disable-shaper
+
+LDFLAGS += -L/usr/local/lib -lakrypt
+CFLAGS += -I/usr/local/include
+LDFLAGS+= -Xlinker -rpath=/usr/local/include/
+LIBS += -libakrypt
+
+make 
 make install
 ```
 <details>
@@ -80,7 +98,7 @@ default {
 cobra {
   pass  test;
   type  tun;            # IP tunnel
-  proto tcp;            # UDP protocol
+  proto udp;            # UDP protocol
   comp  no;          # LZO compression level 9
   encrypt yes;            # Encryption
   keepalive yes;        # Keep connection alive
